@@ -125,3 +125,16 @@ func WritablePath() string {
 	}
 	return ""
 }
+
+// GetEnvTrimmed returns the first non-empty trimmed value from the given environment variable keys.
+// Useful for supporting both uppercase and lowercase env var conventions.
+func GetEnvTrimmed(keys ...string) string {
+	for _, key := range keys {
+		if value, ok := os.LookupEnv(key); ok {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}

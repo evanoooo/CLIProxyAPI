@@ -25,10 +25,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/translator"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -404,9 +402,6 @@ func main() {
 			configFileExists = true
 		}
 	}
-	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
-	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
-
 	if err = logging.ConfigureLogOutput(cfg); err != nil {
 		log.Errorf("failed to configure log output: %v", err)
 		return
@@ -444,16 +439,6 @@ func main() {
 
 	// Register built-in access providers before constructing services.
 	configaccess.Register()
-
-	// Initialize usage database plugin for statistics persistence (disabled by default).
-	// Set usage-persistence-enabled: true in config to enable. Uses PostgreSQL if PGSTORE_DSN
-	// is set, otherwise SQLite in auth directory.
-	if cfg.UsagePersistenceEnabled {
-		if err := usage.InitDatabasePlugin(context.Background(), pgStoreDSN, pgStoreSchema, cfg.AuthDir); err != nil {
-			log.Warnf("usage database init failed, using memory only: %v", err)
-		}
-		defer usage.CloseDatabasePlugin()
-	}
 
 	// Handle different command modes based on the provided flags.
 

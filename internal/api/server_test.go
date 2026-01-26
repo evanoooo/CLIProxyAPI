@@ -10,6 +10,7 @@ import (
 
 	gin "github.com/gin-gonic/gin"
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
@@ -35,6 +36,7 @@ func newTestServer(t *testing.T) *Server {
 		Debug:                  true,
 		LoggingToFile:          false,
 		UsageStatisticsEnabled: false,
+		RemoteManagement:       proxyconfig.RemoteManagement{DisableControlPanel: true},
 	}
 
 	authManager := auth.NewManager(nil, nil, nil)
@@ -42,6 +44,54 @@ func newTestServer(t *testing.T) *Server {
 
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	return NewServer(cfg, authManager, accessManager, configPath)
+}
+
+func TestUsagePersistenceEnabledHotReload(t *testing.T) {
+	t.Setenv("PGSTORE_DSN", "")
+	t.Setenv("pgstore_dsn", "")
+	t.Setenv("PGSTORE_SCHEMA", "")
+	t.Setenv("pgstore_schema", "")
+
+	internalusage.CloseDatabasePlugin()
+	defer internalusage.CloseDatabasePlugin()
+
+	server := newTestServer(t)
+
+	disabled := *server.cfg
+	disabled.UsagePersistenceEnabled = false
+	server.UpdateClients(&disabled)
+	if internalusage.GetDatabasePlugin() != nil {
+		t.Fatalf("expected database plugin to be nil when disabled")
+	}
+
+	enabled := disabled
+	enabled.UsagePersistenceEnabled = true
+	server.UpdateClients(&enabled)
+	firstPlugin := internalusage.GetDatabasePlugin()
+	if firstPlugin == nil {
+		t.Fatalf("expected database plugin to be initialized when enabled")
+	}
+	if _, err := os.Stat(filepath.Join(enabled.AuthDir, "usage.db")); err != nil {
+		t.Fatalf("expected sqlite usage db to exist: %v", err)
+	}
+
+	disabledAgain := enabled
+	disabledAgain.UsagePersistenceEnabled = false
+	server.UpdateClients(&disabledAgain)
+	if internalusage.GetDatabasePlugin() != nil {
+		t.Fatalf("expected database plugin to be nil after disabling")
+	}
+
+	enabledAgain := disabledAgain
+	enabledAgain.UsagePersistenceEnabled = true
+	server.UpdateClients(&enabledAgain)
+	secondPlugin := internalusage.GetDatabasePlugin()
+	if secondPlugin == nil {
+		t.Fatalf("expected database plugin to be initialized after re-enabling")
+	}
+	if secondPlugin == firstPlugin {
+		t.Fatalf("expected database plugin to be re-initialized after re-enabling")
+	}
 }
 
 func TestAmpProviderModelRoutes(t *testing.T) {

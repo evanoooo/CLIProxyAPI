@@ -254,6 +254,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		authManager.SetRetryConfig(cfg.RequestRetry, time.Duration(cfg.MaxRetryInterval)*time.Second)
 	}
 	managementasset.SetCurrentConfig(cfg)
+	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 	misc.SetCodexInstructionsEnabled(cfg.CodexInstructionsEnabled)
 	// Initialize management handler
@@ -901,6 +902,19 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 			log.Debugf("usage_statistics_enabled updated from %t to %t", oldCfg.UsageStatisticsEnabled, cfg.UsageStatisticsEnabled)
 		} else {
 			log.Debugf("usage_statistics_enabled toggled to %t", cfg.UsageStatisticsEnabled)
+		}
+	}
+
+	usagePersistenceChanged := oldCfg == nil || oldCfg.UsagePersistenceEnabled != cfg.UsagePersistenceEnabled
+	usageAuthDirChanged := cfg.UsagePersistenceEnabled && oldCfg != nil && oldCfg.AuthDir != cfg.AuthDir
+	// AuthDir changes only affect the SQLite backend.
+	if usagePersistenceChanged || (usageAuthDirChanged && usage.UsingSQLiteBackend()) {
+		if err := usage.UpdatePersistence(context.Background(), cfg.UsagePersistenceEnabled, cfg.AuthDir); err != nil {
+			log.Warnf("usage database init failed, using memory only: %v", err)
+		} else if oldCfg != nil {
+			log.Debugf("usage_persistence_enabled updated from %t to %t", oldCfg.UsagePersistenceEnabled, cfg.UsagePersistenceEnabled)
+		} else {
+			log.Debugf("usage_persistence_enabled toggled to %t", cfg.UsagePersistenceEnabled)
 		}
 	}
 

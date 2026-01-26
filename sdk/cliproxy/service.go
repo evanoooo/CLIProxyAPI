@@ -15,7 +15,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/wsrelay"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
@@ -430,6 +430,12 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 
+	if s.cfg != nil {
+		if err := internalusage.UpdatePersistence(ctx, s.cfg.UsagePersistenceEnabled, s.cfg.AuthDir); err != nil {
+			log.Warnf("usage database init failed, using memory only: %v", err)
+		}
+	}
+
 	s.applyRetryConfig(s.cfg)
 
 	if s.coreManager != nil {
@@ -652,6 +658,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			}
 		}
 
+		internalusage.CloseDatabasePlugin()
 		usage.StopDefault()
 	})
 	return shutdownErr

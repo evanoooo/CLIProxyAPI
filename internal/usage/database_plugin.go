@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 )
@@ -19,10 +20,23 @@ const (
 )
 
 var (
-	databasePluginOnce sync.Once
-	databasePlugin     *DatabasePlugin
-	databasePluginMu   sync.RWMutex
+	databasePlugin   *DatabasePlugin
+	databasePluginMu sync.RWMutex
 )
+
+type databasePluginAdapter struct{}
+
+func (databasePluginAdapter) HandleUsage(ctx context.Context, record coreusage.Record) {
+	plugin := GetDatabasePlugin()
+	if plugin == nil {
+		return
+	}
+	plugin.HandleUsage(ctx, record)
+}
+
+func init() {
+	coreusage.RegisterPlugin(databasePluginAdapter{})
+}
 
 // DatabasePlugin persists usage records to database and provides combined statistics.
 type DatabasePlugin struct {
@@ -42,45 +56,54 @@ type DatabasePlugin struct {
 // If initialization fails, returns the error but does not prevent the system from running.
 // Reads USAGE_RETENTION_DAYS environment variable for data retention period (default 30 days).
 func InitDatabasePlugin(ctx context.Context, pgDSN, pgSchema, authDir string) error {
-	var initErr error
-	databasePluginOnce.Do(func() {
-		store, err := NewUsageStore(ctx, pgDSN, pgSchema, authDir)
-		if err != nil {
-			initErr = err
-			return
-		}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-		retentionDays := defaultRetentionDays
-		if envVal := os.Getenv("USAGE_RETENTION_DAYS"); envVal != "" {
-			if days, parseErr := strconv.Atoi(envVal); parseErr == nil && days > 0 {
-				retentionDays = days
-			}
-		}
+	databasePluginMu.RLock()
+	alreadyEnabled := databasePlugin != nil
+	databasePluginMu.RUnlock()
+	if alreadyEnabled {
+		return nil
+	}
 
-		plugin := &DatabasePlugin{
-			store:         store,
-			retentionDays: retentionDays,
-			buffer:        make([]UsageRecord, 0, defaultBufferSize),
-			flushCh:       make(chan struct{}, 1),
-			closeCh:       make(chan struct{}),
-		}
-		plugin.wg.Add(1)
-		go plugin.flushLoop()
+	databasePluginMu.Lock()
+	defer databasePluginMu.Unlock()
+	if databasePlugin != nil {
+		return nil
+	}
 
-		// Run initial cleanup of old records
-		if deleted, cleanupErr := store.DeleteOldRecords(ctx, retentionDays); cleanupErr != nil {
-			log.WithError(cleanupErr).Warn("usage: failed to cleanup old records on startup")
-		} else if deleted > 0 {
-			log.WithField("deleted", deleted).Infof("usage: cleaned up records older than %d days", retentionDays)
-		}
+	store, err := NewUsageStore(ctx, pgDSN, pgSchema, authDir)
+	if err != nil {
+		return err
+	}
 
-		databasePluginMu.Lock()
-		databasePlugin = plugin
-		databasePluginMu.Unlock()
-		// Register with the usage manager
-		coreusage.RegisterPlugin(plugin)
-	})
-	return initErr
+	retentionDays := defaultRetentionDays
+	if envVal := os.Getenv("USAGE_RETENTION_DAYS"); envVal != "" {
+		if days, parseErr := strconv.Atoi(envVal); parseErr == nil && days > 0 {
+			retentionDays = days
+		}
+	}
+
+	plugin := &DatabasePlugin{
+		store:         store,
+		retentionDays: retentionDays,
+		buffer:        make([]UsageRecord, 0, defaultBufferSize),
+		flushCh:       make(chan struct{}, 1),
+		closeCh:       make(chan struct{}),
+	}
+	plugin.wg.Add(1)
+	go plugin.flushLoop()
+
+	// Run initial cleanup of old records
+	if deleted, cleanupErr := store.DeleteOldRecords(ctx, retentionDays); cleanupErr != nil {
+		log.WithError(cleanupErr).Warn("usage: failed to cleanup old records on startup")
+	} else if deleted > 0 {
+		log.WithField("deleted", deleted).Infof("usage: cleaned up records older than %d days", retentionDays)
+	}
+
+	databasePlugin = plugin
+	return nil
 }
 
 // GetDatabasePlugin returns the global database plugin instance, or nil if not initialized.
@@ -93,17 +116,40 @@ func GetDatabasePlugin() *DatabasePlugin {
 // CloseDatabasePlugin closes the database connection after flushing pending writes.
 func CloseDatabasePlugin() {
 	databasePluginMu.Lock()
-	defer databasePluginMu.Unlock()
-	if databasePlugin != nil {
-		databasePlugin.closeOnce.Do(func() {
-			close(databasePlugin.closeCh)
-		})
-		databasePlugin.wg.Wait()
-		if databasePlugin.store != nil {
-			_ = databasePlugin.store.Close()
-		}
-	}
+	plugin := databasePlugin
 	databasePlugin = nil
+	databasePluginMu.Unlock()
+
+	if plugin == nil {
+		return
+	}
+	plugin.closeOnce.Do(func() {
+		close(plugin.closeCh)
+	})
+	plugin.wg.Wait()
+	if plugin.store != nil {
+		_ = plugin.store.Close()
+	}
+}
+
+// UpdatePersistence enables or disables usage persistence based on the provided flag.
+// When enabling, it reads PGSTORE_DSN/pgstore_dsn and PGSTORE_SCHEMA/pgstore_schema
+// from environment variables to determine the database backend.
+// If PGSTORE_DSN is empty, SQLite is used with the database stored in authDir.
+func UpdatePersistence(ctx context.Context, enabled bool, authDir string) error {
+	if !enabled {
+		CloseDatabasePlugin()
+		return nil
+	}
+	pgStoreDSN := util.GetEnvTrimmed("PGSTORE_DSN", "pgstore_dsn")
+	pgStoreSchema := util.GetEnvTrimmed("PGSTORE_SCHEMA", "pgstore_schema")
+	CloseDatabasePlugin()
+	return InitDatabasePlugin(ctx, pgStoreDSN, pgStoreSchema, authDir)
+}
+
+// UsingSQLiteBackend returns true if the usage persistence would use SQLite (no PGSTORE_DSN set).
+func UsingSQLiteBackend() bool {
+	return util.GetEnvTrimmed("PGSTORE_DSN", "pgstore_dsn") == ""
 }
 
 // flushLoop periodically flushes the buffer to the database and cleans up old records.

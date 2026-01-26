@@ -54,6 +54,11 @@ type Config struct {
 	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
 
+	// UsagePersistenceEnabled toggles database persistence for usage statistics; when false (default),
+	// usage data is only kept in memory and lost on restart. When true, uses PostgreSQL if PGSTORE_DSN
+	// is set, otherwise SQLite in auth directory.
+	UsagePersistenceEnabled bool `yaml:"usage-persistence-enabled" json:"usage-persistence-enabled"`
+
 	// DisableCooling disables quota cooldown scheduling when true.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
 

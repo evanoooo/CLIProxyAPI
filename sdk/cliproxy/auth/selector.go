@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"net/http"
 	"sort"
 	"strconv"
@@ -25,6 +26,16 @@ type RoundRobinSelector struct {
 // This "burns" one account before moving to the next, which can help stagger
 // rolling-window subscription caps (e.g. chat message limits).
 type FillFirstSelector struct{}
+
+// SequentialFillSelector selects credentials sequentially without jumping back.
+// Unlike FillFirstSelector which always picks the first available (by ID),
+// this selector "sticks" to the current credential until it becomes unavailable,
+// then advances to the next one. When a previously used credential recovers,
+// it won't jump back - ensuring balanced usage across all credentials.
+type SequentialFillSelector struct {
+	mu      sync.Mutex
+	current map[string]string // provider:model -> current auth ID
+}
 
 type blockReason int
 
@@ -212,6 +223,59 @@ func (s *FillFirstSelector) Pick(ctx context.Context, provider, model string, op
 		return nil, err
 	}
 	return available[0], nil
+}
+
+// Pick selects credentials sequentially without jumping back to earlier ones.
+func (s *SequentialFillSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+	_ = ctx
+	_ = opts
+	now := time.Now()
+	available, err := getAvailableAuths(auths, provider, model, now)
+	if err != nil {
+		return nil, err
+	}
+
+	key := provider + ":" + model
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.current == nil {
+		s.current = make(map[string]string)
+	}
+	currentID := s.current[key]
+
+	// First access: randomly select a starting credential
+	if currentID == "" {
+		startIndex := rand.Intn(len(available))
+		s.current[key] = available[startIndex].ID
+		return available[startIndex], nil
+	}
+
+	// Sticky: if current credential is still available, keep using it
+	for _, auth := range available {
+		if auth.ID == currentID {
+			return auth, nil
+		}
+	}
+
+	// Advance: find the first credential with ID > currentID
+	for _, auth := range available {
+		if auth.ID > currentID {
+			s.current[key] = auth.ID
+			return auth, nil
+		}
+	}
+
+	// New round: all subsequent credentials unavailable, start from beginning
+	s.current[key] = available[0].ID
+	return available[0], nil
+}
+
+// MaxRetryAttempts implements RetryLimiter.
+// Returns 2 to limit attempts to current credential + 1 retry,
+// preserving stickiness and preventing credential pool exhaustion.
+func (s *SequentialFillSelector) MaxRetryAttempts() int {
+	return 2
 }
 
 func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, blockReason, time.Time) {

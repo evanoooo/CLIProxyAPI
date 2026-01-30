@@ -29,6 +29,7 @@ const geminiCLIFunctionThoughtSignature = "skip_thought_signature_validator"
 //   - []byte: The transformed request data in Gemini CLI API format
 func ConvertOpenAIRequestToAntigravity(modelName string, inputRawJSON []byte, _ bool) []byte {
 	rawJSON := bytes.Clone(inputRawJSON)
+	hasWebSearchTool := false
 	// Base envelope (no default thinkingConfig)
 	out := []byte(`{"project":"","request":{"contents":[]},"model":"gemini-2.5-pro"}`)
 
@@ -360,6 +361,17 @@ func ConvertOpenAIRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 					hasFunction = true
 				}
 			}
+			if t.Get("type").String() == "web_search" {
+				hasWebSearchTool = true
+				googleToolNode := []byte(`{}`)
+				var errSet error
+				googleToolNode, errSet = sjson.SetRawBytes(googleToolNode, "googleSearch", []byte(`{}`))
+				if errSet != nil {
+					log.Warnf("Failed to set googleSearch tool for web_search: %v", errSet)
+					continue
+				}
+				googleSearchNodes = append(googleSearchNodes, googleToolNode)
+			}
 			if gs := t.Get("google_search"); gs.Exists() {
 				googleToolNode := []byte(`{}`)
 				var errSet error
@@ -381,6 +393,12 @@ func ConvertOpenAIRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 			}
 			out, _ = sjson.SetRawBytes(out, "request.tools", toolsNode)
 		}
+	}
+
+	if hasWebSearchTool {
+		out, _ = sjson.SetBytes(out, "model", "gemini-2.5-flash")
+		out, _ = sjson.SetBytes(out, "request.generationConfig.candidateCount", 1)
+		out, _ = sjson.SetBytes(out, "requestType", "web_search")
 	}
 
 	return common.AttachDefaultSafetySettings(out, "request.safetySettings")

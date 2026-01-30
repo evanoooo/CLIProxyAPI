@@ -117,7 +117,8 @@ jobs:
       - name: Generate version
         id: version
         run: |
-          VERSION=$(git describe --tags --always --dirty | sed 's|^fork/||')
+          # Remove fork/ prefix and v prefix for semver compatibility
+          VERSION=$(git describe --tags --always --dirty | sed 's|^fork/||' | sed 's|^v||')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download digests

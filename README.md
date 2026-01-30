@@ -8,6 +8,59 @@ It now also supports OpenAI Codex (GPT models) and Claude Code via OAuth.
 
 So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
 
+## Fork Features
+
+This fork includes the following enhancements not available in the upstream repository:
+
+### Web Search Support via Gemini (Antigravity)
+
+Enables web search capabilities for Antigravity provider through Gemini's googleSearch tool:
+- Auto-detects `web_search` tool requests from Claude/OpenAI API formats
+- Automatically switches model to `gemini-2.5-flash` for search queries
+- Converts search requests to Gemini's native googleSearch tool format
+- Parses `groundingMetadata` and transforms results to compatible format
+- Supports both Claude `tool_result` and OpenAI function response formats
+
+### Sequential Fill (SF) Routing Strategy
+
+A sticky credential selection strategy (`sf` or `sequential-fill`) that optimizes credential usage:
+- Sticks to the current credential until it becomes unavailable
+- Random starting point for initial selection to balance load across credentials
+- Sequential advancement without jumping back to recovered credentials
+- Preserves stickiness with `MaxRetryAttempts = 2`
+
+Configuration:
+```yaml
+routing:
+  strategy: "sf"  # or "sequential-fill"
+```
+
+### Usage Statistics Persistence
+
+Control database persistence for usage statistics:
+
+```yaml
+# Enable/disable database persistence (default: false, memory-only)
+usage-persistence-enabled: true
+```
+
+### Automatic Usage Data Cleanup
+
+Automatically cleans up old usage statistics data:
+- Configurable retention period via `USAGE_RETENTION_DAYS` environment variable (default: 30 days)
+- Executes cleanup on startup and every 4 hours
+- Supports both PostgreSQL and SQLite backends
+
+### CI/CD Optimizations
+
+- Docker workflow with matrix strategy and layer caching for faster builds
+- Multi-architecture support (amd64/arm64) with manifest creation
+- Migrated Docker registry from DockerHub to GitHub Container Registry (ghcr.io)
+- Cross-compilation Dockerfile for faster multi-platform builds
+- Automatic cleanup of temporary Docker tags
+
+---
+
 ## Sponsor
 
 [![z.ai](https://assets.router-for.me/english-4.7.png)](https://z.ai/subscribe?ic=8JVLJQFSKB)

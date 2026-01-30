@@ -8,6 +8,59 @@
 
 您可以使用本地或多账户的CLI方式，通过任何与 OpenAI（包括Responses）/Gemini/Claude 兼容的客户端和SDK进行访问。
 
+## Fork 特有功能
+
+本 fork 包含以下上游仓库中没有的增强功能：
+
+### 通过 Gemini 实现 Web 搜索支持 (Antigravity)
+
+为 Antigravity 提供商启用基于 Gemini googleSearch 工具的网络搜索能力：
+- 自动检测来自 Claude/OpenAI API 格式的 `web_search` 工具请求
+- 自动切换模型至 `gemini-2.5-flash` 执行搜索查询
+- 将搜索请求转换为 Gemini 原生 googleSearch 工具格式
+- 解析 `groundingMetadata` 并转换为兼容格式的结果
+- 同时支持 Claude `tool_result` 和 OpenAI function response 格式
+
+### Sequential Fill (SF) 路由策略
+
+一种粘性凭证选择策略（`sf` 或 `sequential-fill`），优化凭证使用：
+- 坚持使用当前凭证直到其不可用
+- 随机起始点以在凭证间均衡负载
+- 顺序推进，不会跳回已恢复的凭证
+- 通过 `MaxRetryAttempts = 2` 保持粘性
+
+配置方式：
+```yaml
+routing:
+  strategy: "sf"  # 或 "sequential-fill"
+```
+
+### 使用量统计持久化
+
+控制使用量统计的数据库持久化：
+
+```yaml
+# 启用/禁用数据库持久化（默认：false，仅内存存储）
+usage-persistence-enabled: true
+```
+
+### 自动清理使用量数据
+
+自动清理旧的使用量统计数据：
+- 通过 `USAGE_RETENTION_DAYS` 环境变量配置保留天数（默认：30 天）
+- 启动时执行清理，之后每 4 小时自动清理
+- 同时支持 PostgreSQL 和 SQLite 后端
+
+### CI/CD 优化
+
+- Docker 工作流采用矩阵策略和层缓存，加速构建
+- 多架构支持（amd64/arm64）并创建 manifest
+- Docker 镜像仓库从 DockerHub 迁移至 GitHub Container Registry (ghcr.io)
+- 交叉编译 Dockerfile，加速多平台构建
+- 自动清理临时 Docker 标签
+
+---
+
 ## 赞助商
 
 [![bigmodel.cn](https://assets.router-for.me/chinese-4.7.png)](https://www.bigmodel.cn/claude-code?ic=RRVJPB5SII)

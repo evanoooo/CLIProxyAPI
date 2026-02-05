@@ -2,23 +2,36 @@ name: Sync Upstream
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 每天凌晨0点执行一次
-  workflow_dispatch:      # 允许手动点击按钮触发同步
+    - cron: '0 0 * * *' # 每天凌晨0点（UTC）执行
+  workflow_dispatch:      # 允许手动点击按钮触发
 
 jobs:
-  sync_latest_from_upstream:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          # 注意：必须设置为 0 以获取所有历史记录，否则无法合并
+          fetch-depth: 0 
 
-      - name: Sync upstream changes
-        id: sync
-        uses: aieri/sync-upstream@v1.0.1
-        with:
-          upstream_repo: "上游用户名/仓库名"
-          upstream_branch: "main" # 或者是 master
-          target_branch: "main"   # 你的分支名
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Config Git
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+
+      - name: Sync Upstream
+        run: |
+          # 1. 添加上游仓库地址（请替换为实际的上游URL）
+          git remote add upstream https://github.com/router-for-me/CLIProxyAPI.git
+          
+          # 2. 拉取上游分支
+          git fetch upstream
+          
+          # 3. 切换到你的主分支并合并上游分支
+          git checkout main
+          git merge upstream/main --ff-only || git merge upstream/main --no-edit
+          
+          # 4. 推送到你的 Fork 仓库
+          # 这里使用内置的 GITHUB_TOKEN，无需额外配置
+          git push origin main
